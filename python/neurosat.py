@@ -14,6 +14,8 @@
 # ==============================================================================
 
 import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
+import tensorflow_addons as tfa
 import numpy as np
 import math
 import random
@@ -23,7 +25,6 @@ from confusion import ConfusionMatrix
 from problems_loader import init_problems_loader
 from mlp import MLP
 from util import repeat_end, decode_final_reducer, decode_transfer_fn
-from tensorflow.contrib.rnn import LSTMStateTuple
 from sklearn.cluster import KMeans
 
 class NeuroSAT(object):
@@ -36,38 +37,38 @@ class NeuroSAT(object):
         self.train_problems_loader = None
 
     def init_random_seeds(self):
-        tf.set_random_seed(self.opts.tf_seed)
+        tf.random.set_seed(self.opts.tf_seed)
         np.random.seed(self.opts.np_seed)
 
     def construct_session(self):
-        self.sess = tf.Session()
+        self.sess = tf.compat.v1.Session()
 
     def declare_parameters(self):
         opts = self.opts
-        with tf.variable_scope('params') as scope:
-            self.L_init = tf.get_variable(name="L_init", initializer=tf.random_normal([1, self.opts.d]))
-            self.C_init = tf.get_variable(name="C_init", initializer=tf.random_normal([1, self.opts.d]))
+        with tf.compat.v1.variable_scope('params') as scope:
+            self.L_init = tf.compat.v1.get_variable(name="L_init", initializer=tf.compat.v1.random_normal([1, self.opts.d]))
+            self.C_init = tf.compat.v1.get_variable(name="C_init", initializer=tf.compat.v1.random_normal([1, self.opts.d]))
 
             self.LC_msg = MLP(opts, opts.d, repeat_end(opts.d, opts.n_msg_layers, opts.d), name=("LC_msg"))
             self.CL_msg = MLP(opts, opts.d, repeat_end(opts.d, opts.n_msg_layers, opts.d), name=("CL_msg"))
 
-            self.L_update = tf.contrib.rnn.LayerNormBasicLSTMCell(self.opts.d, activation=decode_transfer_fn(opts.lstm_transfer_fn))
-            self.C_update = tf.contrib.rnn.LayerNormBasicLSTMCell(self.opts.d, activation=decode_transfer_fn(opts.lstm_transfer_fn))
+            self.L_update = tfa.rnn.LayerNormLSTMCell(self.opts.d, activation=decode_transfer_fn(opts.lstm_transfer_fn))
+            self.C_update = tfa.rnn.LayerNormLSTMCell(self.opts.d, activation=decode_transfer_fn(opts.lstm_transfer_fn))
 
             self.L_vote = MLP(opts, opts.d, repeat_end(opts.d, opts.n_vote_layers, 1), name=("L_vote"))
-            self.vote_bias = tf.get_variable(name="vote_bias", shape=[], initializer=tf.zeros_initializer())
+            self.vote_bias = tf.compat.v1.get_variable(name="vote_bias", shape=[], initializer=tf.zeros_initializer())
 
     def declare_placeholders(self):
-        self.n_vars = tf.placeholder(tf.int32, shape=[], name='n_vars')
-        self.n_lits = tf.placeholder(tf.int32, shape=[], name='n_lits')
-        self.n_clauses = tf.placeholder(tf.int32, shape=[], name='n_clauses')
+        self.n_vars = tf.Variable(tf.ones(shape=[]), tf.int32, name='n_vars')
+        self.n_lits = tf.Variable(tf.ones(shape=[]), tf.int32, name='n_lits')
+        self.n_clauses = tf.Variable(tf.ones(shape=[]), tf.int32, name='n_clauses')
 
-        self.L_unpack = tf.sparse_placeholder(tf.float32, shape=[None, None], name='L_unpack')
-        self.is_sat = tf.placeholder(tf.bool, shape=[None], name='is_sat')
+        self.L_unpack = tf.compat.v1.sparse_placeholder(tf.float32, shape=[None, None], name='L_unpack')
+        self.is_sat = tf.compat.v1.placeholder(tf.bool, shape=[None], name='is_sat')
 
         # useful helpers
-        self.n_batches = tf.shape(self.is_sat)[0]
-        self.n_vars_per_batch = tf.div(self.n_vars, self.n_batches)
+        self.n_batches = tf.cast(tf.shape(self.is_sat)[0], tf.float32)
+        self.n_vars_per_batch = tf.divide(self.n_vars, self.n_batches)
 
     def while_cond(self, i, L_state, C_state):
         return tf.less(i, self.opts.n_rounds)
@@ -77,15 +78,16 @@ class NeuroSAT(object):
 
     def while_body(self, i, L_state, C_state):
         LC_pre_msgs = self.LC_msg.forward(L_state.h)
-        LC_msgs = tf.sparse_tensor_dense_matmul(self.L_unpack, LC_pre_msgs, adjoint_a=True)
+        LC_msgs = tf.compat.v1.sparse_tensor_dense_matmul(self.L_unpack, LC_pre_msgs, adjoint_a=True)
 
-        with tf.variable_scope('C_update') as scope:
-            _, C_state = self.C_update(inputs=LC_msgs, state=C_state)
+        with tf.compat.v1.variable_scope('C_update') as scope:
+            _, C_state = self.C_update(tf.expand_dims(LC_msgs, axis=0), C_state[0])
+            C_state = (C_state, 0)
 
         CL_pre_msgs = self.CL_msg.forward(C_state.h)
-        CL_msgs = tf.sparse_tensor_dense_matmul(self.L_unpack, CL_pre_msgs)
+        CL_msgs = tf.compat.v1.sparse_tensor_dense_matmul(self.L_unpack, CL_pre_msgs)
 
-        with tf.variable_scope('L_update') as scope:
+        with tf.compat.v1.variable_scope('L_update') as scope:
             _, L_state = self.L_update(inputs=tf.concat([CL_msgs, self.flip(L_state.h)], axis=1), state=L_state)
 
         return i+1, L_state, C_state
@@ -94,11 +96,11 @@ class NeuroSAT(object):
         with tf.name_scope('pass_messages') as scope:
             denom = tf.sqrt(tf.cast(self.opts.d, tf.float32))
 
-            L_output = tf.tile(tf.div(self.L_init, denom), [self.n_lits, 1])
-            C_output = tf.tile(tf.div(self.C_init, denom), [self.n_clauses, 1])
+            L_output = tf.tile(tf.divide(self.L_init, denom), [self.n_lits, 1])
+            C_output = tf.tile(tf.divide(self.C_init, denom), [self.n_clauses, 1])
 
-            L_state = LSTMStateTuple(h=L_output, c=tf.zeros([self.n_lits, self.opts.d]))
-            C_state = LSTMStateTuple(h=C_output, c=tf.zeros([self.n_clauses, self.opts.d]))
+            L_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(h=L_output, c=tf.zeros([self.n_lits, self.opts.d]))
+            C_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(h=C_output, c=tf.zeros([self.n_clauses, self.opts.d]))
 
             _, L_state, C_state = tf.while_loop(self.while_cond, self.while_body, [0, L_state, C_state])
 
@@ -127,7 +129,7 @@ class NeuroSAT(object):
     def build_optimizer(self):
         opts = self.opts
 
-        self.global_step = tf.get_variable("global_step", shape=[], initializer=tf.zeros_initializer(), trainable=False)
+        self.global_step = tf.compat.v1.get_variable("global_step", shape=[], initializer=tf.zeros_initializer(), trainable=False)
 
         if opts.lr_decay_type == "no_decay":
             self.learning_rate = tf.constant(opts.lr_start)

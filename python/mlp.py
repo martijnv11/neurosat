@@ -15,6 +15,7 @@
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from util import decode_transfer_fn
 
 def init_ws_bs(opts, name, d_in, d_outs):
@@ -22,11 +23,11 @@ def init_ws_bs(opts, name, d_in, d_outs):
     bs = []
     d = d_in
 
-    with tf.variable_scope(name) as scope:
+    with tf.compat.v1.variable_scope(name) as scope:
         for i, d_out in enumerate(d_outs):
-            with tf.variable_scope('%d' % i) as scope:
-                ws.append(tf.get_variable(name="w", shape=[d, d_out], initializer=tf.contrib.layers.xavier_initializer()))
-                bs.append(tf.get_variable(name="b", shape=[d_out], initializer=tf.zeros_initializer()))
+            with tf.compat.v1.variable_scope('%d' % i) as scope:
+                ws.append(tf.compat.v1.get_variable(name="w", shape=[d, d_out], initializer=tf.compat.v1.keras.initializers.glorot_normal))
+                bs.append(tf.compat.v1.get_variable(name="b", shape=[d_out], initializer=tf.zeros_initializer()))
             d = d_out
 
     return (ws, bs)
@@ -42,11 +43,11 @@ class MLP(object):
         self.output_size = d_outs[-1]
 
     def forward(self, z):
-        with tf.variable_scope(self.name) as scope:
-            with tf.variable_scope('fwd') as scope:
+        with tf.compat.v1.variable_scope(self.name) as scope:
+            with tf.compat.v1.variable_scope('fwd') as scope:
                 x = z
                 for i in range(len(self.ws)):
-                    with tf.variable_scope('%d' % i) as scope:
+                    with tf.compat.v1.variable_scope('%d' % i) as scope:
                         x = tf.matmul(x, self.ws[i]) + self.bs[i]
                         if i + 1 < len(self.ws):
                             x = self.transfer_fn(x)
