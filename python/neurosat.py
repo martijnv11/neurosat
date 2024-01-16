@@ -26,6 +26,8 @@ from util import repeat_end, decode_final_reducer, decode_transfer_fn
 from tensorflow.contrib.rnn import LSTMStateTuple
 from sklearn.cluster import KMeans
 
+# extra line
+
 class NeuroSAT(object):
     def __init__(self, opts):
         self.opts = opts
