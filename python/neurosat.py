@@ -14,16 +14,22 @@
 # ==============================================================================
 
 import tensorflow as tf
+import tensorflow_addons as tfa
+import tf_slim as slim
 import numpy as np
 import math
 import random
 import os
 import time
+
 from confusion import ConfusionMatrix
 from problems_loader import init_problems_loader
 from mlp import MLP
 from util import repeat_end, decode_final_reducer, decode_transfer_fn
-from tensorflow.contrib.rnn import LSTMStateTuple
+# from tensorflow.contrib.rnn import LSTMStateTuple
+from tensorflow_addons.rnn.layer_norm_lstm_cell import LayerNormLSTMCell
+# LSTMStateTuple
+
 from sklearn.cluster import KMeans
 
 # extra line
