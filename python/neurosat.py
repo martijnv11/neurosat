@@ -15,7 +15,6 @@
 
 import tensorflow as tf
 import tensorflow_addons as tfa
-import tf_slim as slim
 import numpy as np
 import math
 import random
@@ -27,11 +26,10 @@ from mlp import MLP
 from util import repeat_end, decode_final_reducer, decode_transfer_fn
 # from tensorflow.contrib.rnn import LSTMStateTuple
 from tensorflow_addons.rnn.layer_norm_lstm_cell import LayerNormLSTMCell
-# LSTMStateTuple
 from sklearn.cluster import KMeans
 
 # extra line
-
+tf.compat.v1.disable_eager_execution()
 class NeuroSAT(object):
     def __init__(self, opts):
         self.opts = opts
@@ -84,13 +82,13 @@ class NeuroSAT(object):
 
     def while_body(self, i, L_state, C_state):
         LC_pre_msgs = self.LC_msg.forward(L_state.h)
-        LC_msgs = tf.sparse_tensor_dense_matmul(self.L_unpack, LC_pre_msgs, adjoint_a=True)
+        LC_msgs = tf.sparse.sparse_dense_matmul(self.L_unpack, LC_pre_msgs, adjoint_a=True)
 
         with tf.compat.v1.variable_scope('C_update') as scope:
             _, C_state = self.C_update(inputs=LC_msgs, state=C_state)
 
         CL_pre_msgs = self.CL_msg.forward(C_state.h)
-        CL_msgs = tf.sparse_tensor_dense_matmul(self.L_unpack, CL_pre_msgs)
+        CL_msgs = tf.sparse.sparse_dense_matmul(self.L_unpack, CL_pre_msgs)
 
         with tf.compat.v1.variable_scope('L_update') as scope:
             _, L_state = self.L_update(inputs=tf.concat([CL_msgs, self.flip(L_state.h)], axis=1), state=L_state)
@@ -103,9 +101,9 @@ class NeuroSAT(object):
 
             L_output = tf.tile(tf.divide(self.L_init, denom), [self.n_lits, 1])
             C_output = tf.tile(tf.divide(self.C_init, denom), [self.n_clauses, 1])
-
-            L_state = LayerNormLSTMCell(h=L_output, c=tf.zeros([self.n_lits, self.opts.d]))
-            C_state = LayerNormLSTMCell(h=C_output, c=tf.zeros([self.n_clauses, self.opts.d]))
+            
+            L_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(h=L_output, c=tf.zeros([self.n_lits, self.opts.d]))
+            C_state = tf.compat.v1.nn.rnn_cell.LSTMStateTuple(h=C_output, c=tf.zeros([self.n_clauses, self.opts.d]))
 
             _, L_state, C_state = tf.while_loop(self.while_cond, self.while_body, [0, L_state, C_state])
 
@@ -126,7 +124,7 @@ class NeuroSAT(object):
 
         with tf.name_scope('l2') as scope:
             l2_cost = tf.zeros([])
-            for var in tf.trainable_variables():
+            for var in tf.compat.v1.trainable_variables():
                 l2_cost += tf.nn.l2_loss(var)
 
         self.cost = tf.identity(self.predict_cost + self.opts.l2_weight * l2_cost, name="cost")
@@ -139,23 +137,23 @@ class NeuroSAT(object):
         if opts.lr_decay_type == "no_decay":
             self.learning_rate = tf.constant(opts.lr_start)
         elif opts.lr_decay_type == "poly":
-            self.learning_rate = tf.train.polynomial_decay(opts.lr_start, self.global_step, opts.lr_decay_steps, opts.lr_end, power=opts.lr_power)
+            self.learning_rate = tf.compat.v1.train.polynomial_decay(opts.lr_start, self.global_step, opts.lr_decay_steps, opts.lr_end, power=opts.lr_power)
         elif opts.lr_decay_type == "exp":
-            self.learning_rate = tf.train.exponential_decay(opts.lr_start, self.global_step, opts.lr_decay_steps, opts.lr_decay, staircase=False)
+            self.learning_rate = tf.compat.v1.train.exponential_decay(opts.lr_start, self.global_step, opts.lr_decay_steps, opts.lr_decay, staircase=False)
         else:
             raise Exception("lr_decay_type must be 'no_decay', 'poly' or 'exp'")
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
+        optimizer = tf.optimizers.Adam(learning_rate=self.learning_rate)
 
         gradients, variables = zip(*optimizer.compute_gradients(self.cost))
         gradients, _ = tf.clip_by_global_norm(gradients, self.opts.clip_val)
         self.apply_gradients = optimizer.apply_gradients(zip(gradients, variables), name='apply_gradients', global_step=self.global_step)
 
     def initialize_vars(self):
-        tf.global_variables_initializer().run(session=self.sess)
+        tf.compat.v1.global_variables_initializer().run(session=self.sess)
 
     def init_saver(self):
-        self.saver = tf.train.Saver(max_to_keep=self.opts.n_saves_to_keep)
+        self.saver = tf.compat.v1.train.Saver(max_to_keep=self.opts.n_saves_to_keep)
         if self.opts.run_id:
             self.save_dir = "snapshots/run%d" % self.opts.run_id
             self.save_prefix = "%s/snap" % self.save_dir
